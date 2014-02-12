@@ -1,0 +1,997 @@
+public with sharing class controller_PDEvent {
+   
+    public static final string MODE_STRING_PARAM = 'm';
+    public static final string VIEW_MODE_STRING_VALUE = 'v';
+    public static final string ACCEPT_MODE_STRING_VALUE = 'a';
+
+    public static final string DECLINE_MODE_STRING_VALUE = 'd';
+    public static final Id userProfile = UserInfo.getProfileId();
+    //public static final string PORTAL_MODE_KEY = 'pmk';
+
+    public Professional_Development_Event__c PD_Event {
+
+        get ; set ;
+    }
+    
+    public string unassignedEventMessage {
+        get {
+            if (PD_Event != null) {
+                return PD_Event.Name + ' is not viewable because it has not yet been assigned.';
+
+            }
+            
+            else {
+                return 'The Event is not viewable because it has not yet been assigned.';
+            }
+        }
+    }
+    
+    public boolean toShowVFSection {
+
+        get {
+             List< Profile > currentUserProfile = [
+                Select p.Name , p.Id
+                From Profile p
+                Where p.Id = :UserInfo.getProfileId()
+                    AND (p.Name = 'Professional Development Admin'
+
+                    OR p.Name = 'System Administrator')
+            ];
+           
+           
+
+            if (currentUserProfile.size() == 0 && PD_Event.Specialist__c == null) 
+                return false;
+
+            else
+                 return true;
+        }
+    }    
+   
+    public boolean toShowAcceptButton {
+        get {
+        system.debug('PD_Event.Specialist__c---'+PD_Event.Specialist__c);
+
+        system.debug('PD_Event.Specialist_Response__c---'+PD_Event.Specialist_Response__c);
+        system.debug('isAssignSpecialistRendered---'+isAssignSpecialistRendered);
+        
+         /* Commented to removed accept button from Portal  
+
+            return
+               
+                PD_Event.Specialist__c != null
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.ACCEPTED_SPECIALIST_RESPONSE
+
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.DECLINED_SPECIALIST_RESPONSE
+                && (PD_Event.Specialist__c == UserInfo.getUserId() || isAssignSpecialistRendered );
+
+                */
+                            return
+               
+                PD_Event.Specialist__c != null
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.ACCEPTED_SPECIALIST_RESPONSE
+
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.DECLINED_SPECIALIST_RESPONSE
+                && (isAssignSpecialistRendered );
+       
+        }
+    }
+
+   
+    public boolean toShowDeclineButton {
+        get {
+
+            return
+               
+                PD_Event.Specialist__c != null
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.ACCEPTED_SPECIALIST_RESPONSE
+
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.DECLINED_SPECIALIST_RESPONSE
+                && (PD_Event.Specialist__c == UserInfo.getUserId() || isAssignSpecialistRendered );
+
+        }
+    }
+   
+    public string summary {
+        get ;
+        private set ;
+    }
+   
+    public string severity {
+        // 'confirm', 'info', 'warning', 'error'
+
+        get ;
+        private set ;
+    }
+   
+    private final Professional_Development_Event__c controllerRecord;
+   
+   
+   
+    boolean toRepullPDEvent = false ;
+
+   
+    // BEGIN CONSTRUCTOR
+
+   
+    public controller_PDEvent(ApexPages.StandardController stdController) {
+        system.debug(LoggingLevel.INFO, ' --- begin - controller_PDEvent --- ');
+        isSelectedActivePartnerPortalUsersRendered = false ;
+
+        isSaveRendered = false ;
+       
+         Professional_Development_Event__c [] pdEventList = [ 
+            SELECT Id, Training_Location_Name__c, Training_Site_Room__c, Planned_Recipient_Group__r.Name,  Actual_Recipient_Group__c,Recipient_Opt_Out__c, Planned_Recipient_Group__c , Training_Location_State__c ,  
+
+                    Training_Location_City__c , Training_Location_Zip__c , Training_Site__c, Training_Location_Addr1__c, Training_Location_Addr2__c,Email_Sent_To_Specialist__c,Email_Sent_To_Specialist1__c
+            FROM Professional_Development_Event__c 
+
+            WHERE Id = :stdController.getId() 
+        ];
+        
+        if (pdEventList == null || pdEventList.size() == 0 ) {
+            return;
+        }
+        
+        pdEvent = pdEventList[0];
+
+        /*if(pdEvent.Email_Sent_To_Specialist__c)
+        {
+        isResendRendered = true;
+        }
+        else
+        {
+        isResendRendered = false;
+        } */
+        
+        plannedRGName = pdEvent.Planned_Recipient_Group__r.Name;
+
+        plannedRGId = pdEvent.Planned_Recipient_Group__c;
+       
+        Professional_Development_Event__c tempRecord = (Professional_Development_Event__c )stdController.getRecord();
+        if (PD_Event == null && tempRecord != null && DI_Helper.isId(tempRecord.Id)) {
+
+            PD_Event = DE_ProfessionalDevelopmentEvent_Helper.currentInstance.getByID(tempRecord.Id);
+            controllerRecord = PD_Event;
+        }
+       
+       
+        // Removed 6.21.12 MWT
+        /*
+
+        else {
+            string modeValues = ApexPages.currentPage().getParameters().get(PORTAL_MODE_KEY);
+            if(modeValues != null) {
+                string pdEventId = modeValues.split('_')[1];
+
+                if(DI_Helper.isID(pdEventId)) {
+                    PD_Event = DE_ProfessionalDevelopmentEvent_Helper.currentInstance.getByID(pdEventId);
+                    controllerRecord = PD_Event;
+                }
+
+            }
+        } */
+       
+    }
+   
+    public PageReference dmlOperation() {
+        system.debug(LoggingLevel.INFO, ' --- begin - dmlOperation --- ');
+        if (PD_Event != null) {
+
+            string currentMode = ApexPages.currentPage().getParameters(). get(MODE_STRING_PARAM);      
+           
+            if (PD_Event.Specialist__c == UserInfo.getUserId()) {
+               
+                // if we are here than currentMode has some value
+
+                // so if First_Viewed_DateTime__c is null than
+                // it shows that user come on this pd event for the first time
+                // so we must set current date as First_Viewed_DateTime__c
+
+               
+                if (PD_Event.First_Viewed_DateTime__c == null) {
+                    PD_Event.First_Viewed_DateTime__c = DateTime.now();
+                }
+
+                if (PD_Event.Specialist_Response__c == DE_ProfessionalDevelopmentEvent_Helper.SENT_SPECIALIST_RESPONSE // Updated 2012-06-06 MWT
+
+                    //&& PD_Event.First_Viewed_DateTime__c == null
+                ) {
+                    PD_Event.Specialist_Response__c = DE_ProfessionalDevelopmentEvent_Helper.VIEWED_SPECIALIST_RESPONSE;
+
+                    update PD_Event;
+                    return null ;
+                }              
+               
+               
+            } else {
+                // current user who come to this page is not a specialist assigned to this pd event
+
+                if (currentMode == VIEW_MODE_STRING_VALUE
+                    //|| currentMode == DECLINE_MODE_STRING_VALUE
+                    //|| currentMode == ACCEPT_MODE_STRING_VALUE
+                ) {
+
+                    this .summary = 'You are no longer assigned to this event.';
+                    this .severity = 'warning' ;
+                }
+            }
+        }
+        return null ;
+
+    }
+
+
+    // Get / set methods for event information (SF_Event)
+
+    public Event SF_Event {
+       
+        get {
+            if (SF_Event == null) {
+           
+            //  Event_ID__c
+
+               
+                if (PD_Event.Event_ID__c == null) {
+                    SF_Event = new Event ();
+                } else {
+                    List< Event > eventList = [
+                   
+
+                        SELECT e.WhoId, e.WhatId, e.Subject, e.StartDateTime, e.Location, e.Id, e.EndDateTime, e.ActivityDateTime, e.ActivityDate,
+                            ( SELECT Status, Response, RespondedDate, IsDeleted, Id, EventId, AttendeeId FROM EventAttendees)
+
+                        FROM Event e
+                        WHERE e.Id =: PD_Event.Event_ID__c AND e.WhatId =: PD_Event.Id
+                        LIMIT 1
+                       
+                    ];
+                   
+
+                    SF_Event = (eventList != null && eventList.size() > 0) ? eventList[0] : new Event ();
+                }
+            }
+           
+            return SF_Event;
+        }
+       
+
+        set ;
+    }
+
+    // Get / set methods for event attendee information (PD_Specialist)
+
+    public EventAttendee PD_Specialist {
+       
+        get {
+
+            PD_Specialist = new EventAttendee ();
+
+           
+            if (SF_Event != null) {
+                   
+                    for (EventAttendee a : SF_Event.EventAttendees)
+                   
+                    {
+                       
+
+                        if (a.AttendeeId == PD_Event.Specialist__c) {                          
+                            PD_Specialist = a;                           
+                        }
+                           
+
+                    }
+            }           
+            return PD_Specialist;
+        }
+       
+       
+        set ;
+       
+    }
+
+    public PageReference acceptEvent() {
+        DE_ProfessionalDevelopmentEvent_Helper.currentInstance.acceptEvent(PD_Event);
+
+        system.debug(LoggingLevel.INFO, ' --- 1 controller_PDEvent --- ');
+        system.debug(LoggingLevel.INFO, ' --- 2 acceptEvent --- ' );
+        system.debug(LoggingLevel.INFO, ' --- PD_Event.Specialist_Response__c: '
+
+            + PD_Event.Specialist_Response__c);
+        //return null;
+       
+        //PageReference pr = ApexPages.currentPage();
+        PageReference pr = new PageReference(URL.getCurrentRequestUrl().toExternalForm());
+
+       
+        system.debug(LoggingLevel.INFO, ' --- URL.getCurrentRequestUrl().toExternalForm(): '
+            + URL.getCurrentRequestUrl().toExternalForm());
+       
+        //Commented out by MWT on 6.21.12
+
+        //if(pr.getParameters().get(PORTAL_MODE_KEY) != null) {
+        //  pr.getParameters().put(PORTAL_MODE_KEY, null);
+        //}
+        pr.getParameters().put( 'id' , PD_Event.Id);
+       
+        system.debug(LoggingLevel.INFO, ' --- pr.getUrl(): '
+
+            + pr.getUrl());
+         
+         //DE_NotificationEmail_Helper.currentInstance.sendAcceptEmail(PD_Event, null);  
+         
+        return pr;
+    }
+   //Added by Rohit
+   public PageReference resendEvent() {
+
+        //DE_ProfessionalDevelopmentEvent_Helper.currentInstance.acceptEvent(PD_Event);
+        
+        DE_NotificationEmail_Helper.currentInstance.sendAcceptEmail(PD_Event, null);    
+               
+        //PageReference pr = ApexPages.currentPage();
+
+        PageReference pr = new PageReference(URL.getCurrentRequestUrl().toExternalForm());
+       
+        pr.getParameters().put( 'id' , PD_Event.Id);
+                  
+        return pr;
+    }
+
+
+   //Changes Ends here
+    public PageReference declineEvent() {
+        DE_ProfessionalDevelopmentEvent_Helper.currentInstance.declineEvent(PD_Event);
+       
+        //send notification to the Contract owner when an event is declined - TCB
+
+        DE_NotificationEmail_Helper.currentInstance.sendDeclineEmail(PD_Event, '' );
+       
+        PageReference pr = new PageReference(URL.getCurrentRequestUrl().toExternalForm());
+       
+        //Commented out by MWT on 6.21.12
+
+        //if(pr.getParameters().get(PORTAL_MODE_KEY) != null) {
+        //  pr.getParameters().put(PORTAL_MODE_KEY, null);
+        //}
+        pr.getParameters().put( 'id' , PD_Event.Id);
+       
+        return pr;
+
+
+    }
+   
+    private final string PROFESSIONAL_DEVELOPMENT_TRAINER = 'Professional Development Trainer' ;
+    private final string PROFESSIONAL_DEVELOPMENT_ADMIN = 'Professional Development Admin' ;
+
+    private final string SALES_TEAMS = 'Sales Teams' ;
+   
+    public List<SelectOption> activePartnerPortalUsers {
+        get {
+            if (activePartnerPortalUsers == null) {
+                activePartnerPortalUsers = new List<SelectOption>();
+
+                activePartnerPortalUsers.add( new SelectOption('' , 'Please select a specialist' ));
+               
+                Profile pdtProfile = [
+                    SELECT p.Name , p.Id
+
+                    FROM Profile p
+                    WHERE p.Name LIKE :PROFESSIONAL_DEVELOPMENT_TRAINER
+                    LIMIT 1
+                ];
+                
+                
+               
+
+                if (pdtProfile != null) {
+                    for (User user : [
+                        SELECT u.Name , u.LastName, u.Id
+                        FROM User u
+                        WHERE u.IsActive = true
+
+                            AND u.Profile.Name in ('Professional Development Trainer')  
+              
+                        ORDER BY u.FirstName ASC] //changed to sort by first name instead of last name - CB 12/27/12
+
+                    ){
+                        activePartnerPortalUsers.add( new SelectOption(user.Id, user.Name ));
+                       
+                    }
+                }
+                Profile pdAdminProfile = [
+
+                    SELECT p.Name , p.Id
+                    FROM Profile p
+                    WHERE p.Name LIKE :PROFESSIONAL_DEVELOPMENT_ADMIN
+                    LIMIT 1
+                ];
+                
+
+                 Profile SalesTeamsProfile = [
+                    SELECT p.Name , p.Id
+                    FROM Profile p
+                    WHERE p.Name LIKE :SALES_TEAMS
+                    LIMIT 1
+                ];
+
+                
+                if (pdtProfile != null) {
+                    for (User user : [
+                        SELECT u.Name , u.LastName, u.Id
+                        FROM User u
+                        WHERE u.IsActive = true
+
+                            AND u.Profile.Name in ('Professional Development Admin', 'Sales Teams')  
+              
+                        ORDER BY u.Profile.Name ASC, u.FirstName ASC] //changed to sort by first name instead of last name - CB 12/27/12
+
+                    ){
+                        activePartnerPortalUsers.add( new SelectOption(user.Id, user.Name ));
+                    }
+                }
+                    
+                // select current specialist
+
+                selectedActivePartnerPortalUsers = PD_Event.Specialist__c;
+            }
+            return activePartnerPortalUsers;
+        }
+        private set ;
+    }
+   
+    public string selectedActivePartnerPortalUsers {
+
+        get {
+            return selectedActivePartnerPortalUsers;
+        }
+        set ;
+    }
+   
+    public boolean isSelectedActivePartnerPortalUsersRendered {
+        get ; private set;
+    }
+
+   
+    public PageReference assignSpecialist() {
+       
+        string errorString = DE_ProfessionalDevelopmentEvent_Helper.currentInstance.isSpecialistSchedulable(PD_Event);
+       
+        if (errorString.length() == 0) {
+
+            this .summary = null;
+            isSelectedActivePartnerPortalUsersRendered = true ;
+            isAssignSpecialistRendered = false ;
+        } else {
+            system.debug(LoggingLevel.INFO, ' --- errorString: ' + errorString);
+
+            this .summary = errorString;
+            this .severity = 'warning' ;
+            //return null;
+        }
+       
+        isSendEmailRendered = false ;
+        system.debug(LoggingLevel.INFO, ' --- isSendEmailRendered: ' + isSendEmailRendered);
+
+       
+        //this.summary = null;
+        //isSelectedActivePartnerPortalUsersRendered = true;
+       
+        return null ;
+    }
+   
+    public boolean isSaveRendered {
+        get {
+            return isSaveRendered;
+
+        }
+        private set ;
+    }
+   
+   //Added by Rohit
+   /*public boolean isResendRendered {
+        get {
+            return isResendRendered;
+        }
+        private set ;
+    } */
+
+
+    public boolean isAssignSpecialistRendered {
+        get {
+            // me entry Only display the 'Assign Specialist' buttons for the
+            // 'Professional Development Admin' and 'System Administrator' profiles.
+
+            if (isAssignSpecialistRendered == null) {
+            system.debug('isAssignSpecialistRendered***1'+isAssignSpecialistRendered);
+                isAssignSpecialistRendered = false ;
+            }
+
+            if (PD_Event != null) {
+                // if user who came on the page is a specialist assigned to the PD Event
+                if (PD_Event.Specialist__c == UserInfo.getUserId()
+                    || PD_Event.Status__c == 'Completed'
+
+                    || PD_Event.Confirmed_Date_of_Training__c == null
+                ) {
+                system.debug('isAssignSpecialistRendered***2'+isAssignSpecialistRendered);
+                    isAssignSpecialistRendered = false ;
+
+                } else {
+                    List< Profile > currentUserProfile = [
+                        Select p.Name , p.Id
+                        From Profile p
+                        Where p.Id = :UserInfo.getProfileId()
+
+                            And (p.Name = 'Professional Development Admin'
+                            Or p.Name = 'System Administrator')
+                    ];
+                   
+                    if (currentUserProfile.size() > 0) {
+
+                        isAssignSpecialistRendered = true ;
+                    }
+                }
+            }
+            system.debug('isAssignSpecialistRendered***return'+isAssignSpecialistRendered);
+
+            return isAssignSpecialistRendered;
+        }
+        private set ;
+    }
+   
+    public PageReference showHideSaveButton() {
+        if ('' != selectedActivePartnerPortalUsers || !isSelectedActivePartnerPortalUsersRendered) {
+
+            isSaveRendered = true ;
+        }
+       
+        return null ;
+    }
+   
+    public PageReference savePDEvent() {
+        PageReference pr;
+         
+     
+        try {
+            
+
+            saveTrainingLoc();
+            
+            System.debug('--- Saving PD Event ' + PD_Event); 
+      
+            if (PD_Event.Specialist__c != selectedActivePartnerPortalUsers
+                && selectedActivePartnerPortalUsers != null
+
+                //&& PD_Event.Confirmed_Date_of_Training__c != null
+            ) {
+                string errorString = DE_ProfessionalDevelopmentEvent_Helper.currentInstance.isSpecialistSchedulable(PD_Event);
+
+               
+                if ('' != selectedActivePartnerPortalUsers && errorString.length() == 0) {
+                    DE_ProfessionalDevelopmentEvent_Helper.currentInstance.resetAllSpecialistRelatredFields(PD_Event);
+
+                    DE_ProfessionalDevelopmentEvent_Helper.currentInstance.scheduleSpecialist(PD_Event, selectedActivePartnerPortalUsers);
+                    //update PD_Event;
+                } else {
+                    this .summary = errorString;
+
+                    this .severity = 'warning' ;
+                    return null ;
+                }
+           
+                isSelectedActivePartnerPortalUsersRendered = false ;
+                isSaveRendered = false ;
+
+               
+                pr = new PageReference(URL.getCurrentRequestUrl().toExternalForm());
+            }
+           
+           
+            Professional_Development_Event__c verificationPDEvent =
+
+                DE_ProfessionalDevelopmentEvent_Helper.currentInstance.getByID(PD_Event.Id);
+               
+            //
+                   // CB - removed code to send email if training date changes  - 10/22/12
+
+                   //
+            // if training date was changed or any of the training site fields have changed
+            if(PD_Event.Confirmed_Date_of_Training__c != verificationPDEvent.Confirmed_Date_of_Training__c
+
+            || PD_Event.Actual_Recipient_Group__c != verificationPDEvent.Actual_Recipient_Group__c
+            || PD_Event.Training_Site__c != verificationPDEvent.Training_Site__c
+            || PD_Event.Training_Location_State__c != verificationPDEvent.Training_Location_State__c
+
+            || PD_Event.Training_Location_City__c != verificationPDEvent.Training_Location_City__c
+            || PD_Event.Training_Location_Zip__c != verificationPDEvent.Training_Location_Zip__c
+            || PD_Event.Recipient_Opt_Out__c != verificationPDEvent.Recipient_Opt_Out__c
+
+            || PD_Event.Training_Location_Addr1__c != verificationPDEvent.Training_Location_Addr1__c
+            || PD_Event.Training_Location_Addr2__c != verificationPDEvent.Training_Location_Addr2__c
+            || PD_Event.Training_Location_Name__c != verificationPDEvent.Training_Location_Name__c
+
+           
+            || PD_Event.Training_Site_Room__c != verificationPDEvent.Training_Site_Room__c
+            ) {
+                // if training date was changed
+                string specialistToNotify = PD_Event.Specialist__c;
+
+                // if training date was cleared & changed
+                if(PD_Event.Confirmed_Date_of_Training__c != verificationPDEvent.Confirmed_Date_of_Training__c 
+                && PD_Event.Confirmed_Date_of_Training__c == null) {
+
+                    string inviteStatus = PD_Event.Specialist_Response__c;
+                    // if training date was cleared
+                    DE_ProfessionalDevelopmentEvent_Helper.currentInstance.resetAllSpecialistRelatredFields(PD_Event);
+
+                    // if there is a specialist which must be notified about event cancelation
+                    if(DI_Helper.isId(specialistToNotify)
+                        && inviteStatus == DE_ProfessionalDevelopmentEvent_Helper.ACCEPTED_SPECIALIST_RESPONSE
+
+                    ) {
+                        // notify specialist about event cancelation
+                       // DE_NotificationEmail_Helper.currentInstance.sendNotificationAboutCancelingAnEvent(PD_Event, specialistToNotify);
+
+                    }
+                } else {
+                    // if training date was changed
+                    if (PD_Event.Confirmed_Date_of_Training__c != verificationPDEvent.Confirmed_Date_of_Training__c) {
+
+                        // if there is a specialist which must be notified about event changes
+                        if(DI_Helper.isId(specialistToNotify)) {
+                            string inviteStatus = PD_Event.Specialist_Response__c;
+
+                            // clear all info about specialist and event
+                            DE_ProfessionalDevelopmentEvent_Helper.currentInstance.resetAllSpecialistRelatredFields(PD_Event);
+                            /*if(inviteStatus == DE_ProfessionalDevelopmentEvent_Helper.ACCEPTED_SPECIALIST_RESPONSE
+
+                                && isCurrentUserPDAdmin
+                            ) {
+                                // do not send a new invite to the Specialist...instead, send a cancellation email, 
+
+                                // clear the value for 'Assigned Specialist' and clear the Invite Status 
+                                // (and all other fields related to first viewed, date accepted/rejected, etc.)
+
+                               // DE_NotificationEmail_Helper.currentInstance.sendNotificationAboutCancelingAnEvent(PD_Event, specialistToNotify);
+                            } */
+            
+                       }                     
+
+                    } 
+            
+                }
+                if(pr == null) {
+                    pr = new PageReference(URL.getCurrentRequestUrl().toExternalForm());
+                }
+                //PD_Event.Email_Sent_To_Specialist__c = false;
+
+                update PD_Event;
+            }     
+        }
+       
+        catch (DmlException dmle) {
+        
+            this .summary = dmle.getDmlMessage(0);
+            this .severity = 'warning' ;        
+
+            System.debug('Error saving PD EVent: ' + dmle);
+            return null ;
+        } catch (Exception e) {
+            this .summary = e.getMessage();
+            this .severity = 'error' ;
+
+            System.debug('Error saving PD EVent: ' + e);
+            return null ;
+        }
+       
+        return pr;
+    }
+  
+  
+    public boolean isSendEmailRendered {
+        get {
+
+            system.debug(LoggingLevel.INFO, ' --- begin - isSendEmailRendered --- ');
+            if (isSendEmailRendered == null) {
+                isSendEmailRendered = false ;
+            }
+            if (PD_Event != null
+
+                && PD_Event.Specialist__c != null
+                && PD_Event.Status__c == DE_ProfessionalDevelopmentEvent_Helper.SCHEDULED_STATUS
+                && PD_Event.Specialist_Response__c == 'Accepted'
+
+                ) {
+                if (PD_Event.Specialist__c == UserInfo.getUserId()) {
+                    isSendEmailRendered = false ;
+                } else {
+                    List< Profile > currentUserProfile = [
+
+                        Select p.Name , p.Id
+                        From Profile p
+                        Where p.Id = :UserInfo.getProfileId()
+                            And (p.Name = 'Professional Development Admin'
+
+                            Or p.Name = 'System Administrator')
+                    ];
+                    if (currentUserProfile.size() > 0) {
+                        isSendEmailRendered = true ;
+                    } else {
+
+                        isSendEmailRendered = false ;
+                    }
+                }
+            } else {
+                isSendEmailRendered = false ;
+            }
+            return isSendEmailRendered;
+
+        }
+        private set ;
+    }
+   
+    public string sendNotificationButtonName {
+        get {
+            if (PD_Event != null && PD_Event.Specialist__c != null ) {
+                if (PD_Event.Send_Email_DateTime__c != null) {
+
+                    return 'Resend Invitation' ;
+                } else {
+                    return 'Send Invitation' ;
+                }
+            } else {
+                return '' ;
+
+            }
+        }
+        private set ;
+    }
+   
+    public PageReference sendNotification() {
+        Professional_Development_Event__c verificationPDEvent =
+            DE_ProfessionalDevelopmentEvent_Helper.currentInstance.getByID(PD_Event.Id);
+
+       
+        if (verificationPDEvent.Status__c != DE_ProfessionalDevelopmentEvent_Helper.SCHEDULED_STATUS) {
+            this .summary = 'Sorry, but current event was changed. Please, reload the page.';
+
+            this .severity = 'warning' ;
+            return null ;
+        } else {
+            //DE_Event_Helper.sendNotificationEmail(PD_Event, null);
+            DE_NotificationEmail_Helper.currentInstance.sendInvitationEmail(PD_Event, null);
+
+           
+            PageReference pr = new PageReference(URL.getCurrentRequestUrl().toExternalForm());
+            return pr; 
+        }
+    }
+   
+    public boolean isConfirmedDateRendered {
+        get {
+
+            if (isConfirmedDateRendered == null) {
+                isConfirmedDateRendered = false ;
+            }
+            if (PD_Event != null && PD_Event.Status__c != DE_ProfessionalDevelopmentEvent_Helper.COMPLETED_STATUS) {
+
+                if (PD_Event.Specialist__c != null) {
+                    if (PD_Event.Specialist__c == UserInfo.getUserId()) {
+                        isConfirmedDateRendered = false ;
+                    } else {
+
+                       
+                        List< Profile > currentUserProfile = [
+                            Select p.Name , p.Id
+                            From Profile p
+                            Where p.Id = :UserInfo.getProfileId()
+
+                                And (p.Name = 'Professional Development Admin'
+                                Or p.Name = 'System Administrator')
+                        ];
+                        if (currentUserProfile.size() > 0) {
+
+                            isConfirmedDateRendered = true ;
+                        } else {
+                            isConfirmedDateRendered = false ;
+                        }
+                    }
+                } else {
+
+                    isConfirmedDateRendered = true ;
+                }
+            } else {
+                isConfirmedDateRendered = false ;
+            }
+            return isConfirmedDateRendered;
+        }
+
+        private set ;
+    }
+   
+   
+    public string pdEventStatus {
+        get {
+            if (PD_Event != null) {
+                return PD_Event.Status__c;
+            } else {
+                return null ;
+
+            }
+        }
+        set ;
+    }
+   
+    public string pdEventSpecialist {
+        get {
+            if (PD_Event != null) {
+                return PD_Event.Specialist__c;
+            } else {
+
+                return null ;
+            }
+        }
+        set ;
+    }
+   
+    public boolean isSpecialistResponseCommentsEditable {
+        get {
+            if (PD_Event != null
+                && PD_Event.Specialist__c != null
+
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.ACCEPTED_SPECIALIST_RESPONSE
+                && PD_Event.Specialist_Response__c != DE_ProfessionalDevelopmentEvent_Helper.DECLINED_SPECIALIST_RESPONSE
+
+                && (PD_Event.Specialist__c == UserInfo.getUserId() || userProfile == '00ed0000000OtTt' )
+
+            ) {
+                return true ;
+            } else {
+                return false ;
+
+            }
+        }
+        private set ;
+    }
+   
+    public boolean isCurrentUserPDAdmin {
+        get {
+            List< Profile > currentUserProfile = [
+                Select p.Name , p.Id
+
+                From Profile p
+                Where p.Id = :UserInfo.getProfileId()
+                    And p.Name = 'Professional Development Admin'
+                    //And p.Name = 'System Administrator'
+
+            ];
+            return currentUserProfile.size() > 0;
+        }
+        set ;
+    }
+   
+    public string pdEventSpecialistResponse {
+        get {
+            if (PD_Event != null) {
+
+                return PD_Event.Specialist_Response__c;
+            } else {
+                return null ;
+            }
+        }
+        set ;
+    }
+  
+    //Training Site Code - CB 12/5/12
+
+
+    public Professional_Development_Event__c pdEvent { get; set;}
+    public string trainingSiteLocs { get ;set ;}
+  
+    public string legacyTrainingLocation {
+        get {
+            return DE_Event_TrainingSite_Helper.getLegacyTrainingLocation(PD_Event);
+
+        }
+        set;
+    }
+    
+    
+  
+    public void accountChanged() {      
+        //render the save button
+        isSaveRendered = true ;
+        
+        if (pdEvent != null )    { 
+
+            if (pdEvent.Training_Site__c == null) {
+                pdEvent.Training_Location_Name__c =  '';
+                pdEvent.Training_Location_State__c = '';
+                pdEvent.Training_Location_Zip__c  =  '';
+
+                pdEvent.Training_Location_City__c  =  '';
+                pdEvent.Training_Location_Addr1__c  =  '';
+                pdEvent.Training_Location_Addr2__c  =  '';
+                pdEvent.Training_Site_Room__c = '';
+
+            }
+            
+            else {
+                //refresh the addresses
+                refreshAddress();
+            }
+        }
+    }
+    
+    public string plannedRGName {get;set;}
+
+    public Id plannedRGId {get;set;}
+    
+    public void licensedRecipientChanged() {
+        if (pdEvent != null )    { 
+            pdEvent.Training_Site__c = pdEvent.Actual_Recipient_Group__c;
+            pdEvent.Training_Site_Room__c = '';
+
+            
+            setPlannedRG();
+            
+            accountChanged();
+        }             
+    }
+      
+    public void refreshAddress () {    
+        if (pdEvent != null )    {     
+
+            DE_Event_TrainingSite_Helper.refreshAddresses(pdEvent);
+        }
+    }
+    
+    
+    public void saveTrainingLoc() {
+        if (pdEvent != null )    { 
+            //save Training Site Info
+
+            PD_Event.Training_Site__c = pdEvent.Training_Site__c;   
+            PD_Event.Training_Location_State__c = pdEvent.Training_Location_State__c;
+            PD_Event.Training_Location_City__c = pdEvent.Training_Location_City__c;
+
+            PD_Event.Training_Location_Zip__c = pdEvent.Training_Location_Zip__c;
+            PD_Event.Training_Location_Addr1__c = pdEvent.Training_Location_Addr1__c;
+            PD_Event.Training_Location_Addr2__c = pdEvent.Training_Location_Addr2__c;
+
+            PD_Event.Training_Location_Name__c = pdEvent.Training_Location_Name__c;
+           
+            PD_Event.Training_Site_Room__c = pdEvent.Training_Site_Room__c;
+            PD_Event.Actual_Recipient_Group__c = pdEvent.Actual_Recipient_Group__c; 
+
+            PD_Event.Planned_Recipient_Group__c = plannedRGId;
+            PD_Event.Recipient_Opt_Out__c = pdEvent.Recipient_Opt_Out__c;
+        }
+    }
+    
+    public void optOutChanged() {
+        isSaveRendered = true ;
+
+        setPlannedRG();
+    }
+    
+    private void setPlannedRG () {
+         if (pdEvent.Recipient_Opt_Out__c == false) {
+            Account [] getActName = [SELECT Name FROM Account WHERE Id = :pdEvent.Actual_Recipient_Group__c];   
+
+            if (getActName.size() > 0) {       
+                plannedRGName =  getActName[0].Name;
+                plannedRGId =  pdEvent.Actual_Recipient_Group__c;
+            }
+            else {
+                //if Actual RG is blank then set Planned RG to NULL
+
+                plannedRGName = '';
+                plannedRGId = null;
+            }
+         }
+    }
+
+  
+}
